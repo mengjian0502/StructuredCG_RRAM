@@ -60,19 +60,22 @@ class WQ(nn.Module):
         self.channel_wise = channel_wise
 
     def forward(self, input):
-        z_typical = {'4bit': [0.077, 1.013], '8bit':[0.027, 1.114]}
-        z = z_typical[f'{int(self.wbit)}bit']
-        n_lv = 2 ** (self.wbit - 1) - 1
+        if self.wbit == 32:
+            return input
+        else:
+            z_typical = {'4bit': [0.077, 1.013], '8bit':[0.027, 1.114]}
+            z = z_typical[f'{int(self.wbit)}bit']
+            n_lv = 2 ** (self.wbit - 1) - 1
 
-        m = input.abs().mean()
-        std = input.std()
-        
-        self.alpha_w = 1/z[0] * std - z[1]/z[0] * m 
-        input = input.clamp(-self.alpha_w.item(), self.alpha_w.item())
-        scale = n_lv / self.alpha_w
+            m = input.abs().mean()
+            std = input.std()
+            
+            self.alpha_w = 1/z[0] * std - z[1]/z[0] * m 
+            input = input.clamp(-self.alpha_w.item(), self.alpha_w.item())
+            scale = n_lv / self.alpha_w
 
-        w_float = RoundQuant.apply(input, scale)
-        return w_float
+            w_float = RoundQuant.apply(input, scale)
+            return w_float
     
     def extra_repr(self):
         return super(WQ, self).extra_repr() + 'wbit={}, channel_wise={}'.format(self.wbit, self.channel_wise)
@@ -85,8 +88,11 @@ class AQ(nn.Module):
 
     def forward(self, input):
         if input.size(1) > 3:
-            input = torch.where(input < self.alpha, input, self.alpha)
-            a_float = RoundUQ.apply(input, self.alpha, self.abit)
+            if self.abit == 32:
+                a_float = input
+            else:
+                input = torch.where(input < self.alpha, input, self.alpha)
+                a_float = RoundUQ.apply(input, self.alpha, self.abit)
         else:
             a_float = input
         return a_float

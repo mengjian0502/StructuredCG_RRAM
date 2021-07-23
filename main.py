@@ -16,11 +16,16 @@ import time
 import models
 import logging
 from utils import *
+from pruner import *
 from collections import OrderedDict
 
 # reproducibility
 torch.manual_seed(0)
 np.random.seed(0)
+
+# structured activation masks
+r_list = [0.5, 0.75, 1.0]
+m_list = [3, 4, 5]
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10/ImageNet Training')
 parser.add_argument('--model', type=str, help='model type')
@@ -58,6 +63,15 @@ parser.add_argument('--workers', type=int, default=16,help='number of data loadi
 parser.add_argument('--fine_tune', dest='fine_tune', action='store_true',
                     help='fine tuning from the pre-trained model, force the start epoch be zero')
 parser.add_argument('--resume', default='', type=str, help='path of the pretrained model')
+
+# structured pruning
+parser.add_argument('--swp', dest='swp', action='store_true', help='using structured pruning')
+parser.add_argument('--lamda', type=float, default=0.0001, help='The parameter for swp.')
+parser.add_argument('--ratio', type=float, default=0.25, help='pruned ratio')
+
+# quantization
+parser.add_argument('--wbit', type=int, default=4, help='weight precision')
+parser.add_argument('--abit', type=int, default=4, help='activation precision')
 
 # channel gating
 parser.add_argument('--slice_size', type=int, default=16, help='structured channel gating group size')
@@ -154,7 +168,7 @@ def main():
         logger.info("cg_alpha: {0:.2f}".format(args.cg_alpha))
         logger.info("cg_threshold_init: {0:.2f}".format(args.cg_threshold_init))
         model_cfg.kwargs.update({"slice_size":args.slice_size, "cg_groups":args.cg_groups, "cg_threshold_init":args.cg_threshold_init, 
-                                "cg_alpha":args.cg_alpha, "hard_sig":args.hard_sig})
+                                "cg_alpha":args.cg_alpha, "hard_sig":args.hard_sig, "wbit":args.wbit, "abit":args.abit})
 
     model_cfg.kwargs.update({"num_classes": num_classes})
     net = model_cfg.base(*model_cfg.args, **model_cfg.kwargs) 
@@ -200,10 +214,13 @@ def main():
     start_time = time.time()
     epoch_time = AverageMeter()
     best_acc = 0.
-    columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'tr_time', 'te_loss', 'te_acc', 'best_acc']
+    columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'tr_time', 'te_loss', 'te_acc', 'best_acc', 'grp_spar', 'ovall_spar', 'spar_groups']
 
     if args.cg_groups > 1:
         columns += ['cgspar', 'cgthre']
+
+    if args.swp:
+        columns += ['lambda', 'penalty_groups']
 
     for epoch in range(start_epoch, start_epoch+args.epochs):
 
@@ -230,14 +247,19 @@ def main():
         e_time = time.time() - start_time
         epoch_time.update(e_time)
         start_time = time.time()
+        group_sparsity, overall_sparsity, sparse_groups = get_weight_sparsity(net, args=args)
         
-        values = [epoch + 1, optimizer.param_groups[0]['lr'], train_results['loss'], train_results['acc'], e_time, val_loss, test_acc, best_acc]    
+        values = [epoch + 1, optimizer.param_groups[0]['lr'], train_results['loss'], train_results['acc'], e_time, val_loss, test_acc, best_acc, group_sparsity, overall_sparsity, sparse_groups]    
         if args.cg_groups > 1:
             _, cg_sparsity = get_cg_sparsity(net)
             cg_threshold = get_avg_cg_threshold(net)
             values += [cg_sparsity, cg_threshold]
     
         print_table(values, columns, epoch, logger)
+        
+        # update masks
+        m = cgmask_schedule(epoch, r_list, m_list)
+        update_mtype(net, m)
 
 def lr_schedule(epoch):
     t = epoch / args.epochs
@@ -250,6 +272,17 @@ def lr_schedule(epoch):
     else:
         factor = lr_ratio
     return factor
+
+def cgmask_schedule(epoch, r, mlist):
+    assert len(r) == len(mlist), "size of ratio must equal to size of mask type"
+    t = epoch / args.epochs
+
+    for ii in range(len(r)):
+        if t < r[ii]:
+            m = mlist[ii]
+        else:
+            pass 
+    return m
 
 def update_cg_threshold(model, epoch):
     if args.cg_threshold_target > 0:

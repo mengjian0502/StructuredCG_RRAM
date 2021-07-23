@@ -1,6 +1,7 @@
 """
 Utilities of training
 """
+from models.cg import Conv2d_CG
 import os
 import time
 import shutil
@@ -12,6 +13,8 @@ import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 import torch.nn.functional as F
+from pruner import glasso_global_mp, get_weight_sparsity
+from models.cg import QConv2d_CG
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -183,6 +186,40 @@ def train(trainloader, net, criterion, optimizer, args):
         outputs = net(inputs)
         loss = criterion(outputs, targets) 
 
+        if args.swp:
+            # compute the global threshold
+            thre1 = net.get_global_mp_thre(args.ratio)
+
+            lamda = torch.tensor(args.lamda).cuda()
+            reg_g1 = torch.tensor(0.).cuda()
+            thre_list = []
+            penalty_groups = 0
+            count = 0
+            for m in net.modules():
+                if isinstance(m, Conv2d_CG):
+                    if not count in [0]:
+                        w_l = m.weight
+                        kw = m.weight.size(2)
+                        if kw != 1:
+                            w_l = w_l.permute(0,2,3,1)
+                            w_l = w_l.contiguous().view(w_l.size(0)*w_l.size(1)*w_l.size(2), w_l.size(3))
+                            
+                            reg1, penalty_group1 = glasso_global_mp(w_l, dim=1, thre=thre1)
+                            reg_g1 += reg1
+                            thre = thre1
+                            penalty_group = penalty_group1
+                        
+                        # pruning statistics
+                        if batch_idx == len(trainloader) - 1:
+                            thre_list.append(thre)                      
+                            penalty_groups += penalty_group
+                    count += 1
+
+            loss += lamda * (reg_g1)
+        else:
+            penalty_groups = 0
+            thre_list = []
+
         if args.lambda_CG > 0:
             loss += args.lambda_CG * getChannelGatingRegularizer(net, args.cg_threshold_target)
 
@@ -247,6 +284,10 @@ def update_optimizer(optimizer):
         if len(param.size()) == 4 and param.size(1) > 3:
             lr = p['lr']
 
+def update_mtype(model, m):
+    for m in model.modules():
+        if isinstance(m, QConv2d_CG):
+            m.update_mask(m)
 
 def convert_secs2time(epoch_time):
     need_hour = int(epoch_time / 3600)
@@ -312,3 +353,26 @@ def log2df(log_file_name):
     for i in range(num_epochs):
         df.loc[i] = [float(x) for x in lines[num_lines-num_epochs+i].split()]
     return df 
+
+if __name__ == "__main__":
+    log = log2df('./save/strucCG/resnet20_CG/resnet20_CG_optimSGD_lr0.1_wd0.0005_cg2_cg_slideFalse_4bit_swp/resnet20_CG_optimSGD_lr0.1_wd0.0005_swp0.0003.log')
+    epoch = log['ep']
+    train_acc = log['tr_acc']
+    test_acc = log['te_acc']
+    grp_spar = log['grp_spar']
+    ovall_spar = log['cgspar']
+    spar_groups = log['spar_groups']
+    cg_spars = log['cgspar']
+
+    table = {
+        'epoch': epoch,
+        'train_acc': train_acc,
+        'test_acc': test_acc,
+        'grp_spar': grp_spar,
+        'cg_spar': cg_spars,
+        'ovall_spar': ovall_spar,
+        'spar_groups':spar_groups,
+    }
+
+    variable = pd.DataFrame(table, columns=['epoch', 'train_acc', 'test_acc', 'grp_spar','cg_spars', 'ovall_spar', 'spar_groups'])
+    variable.to_csv('resnet20_CG_optimSGD_lr0.1_wd0.0005_cg2_swp0.0003.csv', index=False)
