@@ -256,10 +256,10 @@ def main():
             values += [cg_sparsity, cg_threshold]
     
         print_table(values, columns, epoch, logger)
-        
+
         # update masks
         m = cgmask_schedule(epoch, r_list, m_list)
-        update_mtype(net, m)
+        net.update_mtype(m)
 
 def lr_schedule(epoch):
     t = epoch / args.epochs
@@ -276,10 +276,9 @@ def lr_schedule(epoch):
 def cgmask_schedule(epoch, r, mlist):
     assert len(r) == len(mlist), "size of ratio must equal to size of mask type"
     t = epoch / args.epochs
-
-    for ii in range(len(r)):
-        if t < r[ii]:
-            m = mlist[ii]
+    for k in range(len(r)):
+        if t < r[k]:
+            m = mlist[k]
         else:
             pass 
     return m

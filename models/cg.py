@@ -219,7 +219,8 @@ class QConv2d_CG(nn.Conv2d):
             self.d = torch.Tensor([]).cuda()
             for ii in range(num_chunk):
                 if (ii+1) % 2 == 0:
-                    masks = torch.rot90(mask, 1, dims=[0,1])
+                    # masks = torch.rot90(masks, 1, dims=[2,3])
+                    masks = 1 - masks
                 self.d = torch.cat((self.d, masks), dim=1)
             
             self.d = torch.cat(input_q.size(0)*[self.d])    # repeat along batch dimension

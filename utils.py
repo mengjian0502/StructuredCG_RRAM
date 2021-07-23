@@ -284,11 +284,6 @@ def update_optimizer(optimizer):
         if len(param.size()) == 4 and param.size(1) > 3:
             lr = p['lr']
 
-def update_mtype(model, m):
-    for m in model.modules():
-        if isinstance(m, QConv2d_CG):
-            m.update_mask(m)
-
 def convert_secs2time(epoch_time):
     need_hour = int(epoch_time / 3600)
     need_mins = int((epoch_time - 3600*need_hour) / 60)

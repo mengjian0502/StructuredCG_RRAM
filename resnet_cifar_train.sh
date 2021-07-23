@@ -28,8 +28,8 @@ cg_slide=False
 slice_size=8
 lambda_swp=0.0005
 ratio=0.5
-wbit=32
-abit=32
+wbit=4
+abit=4
 
 save_path="./save/strucCG/${model}/${model}_optim${optimizer}_lr${lr}_wd${wd}_cg${cg_groups}_cg_slide${cg_slide}_s${slice_size}/"
 log_file="${model}_optim${optimizer}_lr${lr}_wd${wd}_swp${lambda_swp}_wbit${wbit}_abit${abit}.log"

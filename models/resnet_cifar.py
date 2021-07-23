@@ -156,6 +156,11 @@ class CifarResNet(nn.Module):
     threshold = sorted_block_values[thre_index]
     return threshold
 
+  def update_mtype(self, v):
+    for m in self.modules():
+      if isinstance(m, QConv2d_CG):
+        m.mtype = v
+
 
 class resnet20_CG:
   base=CifarResNet 
